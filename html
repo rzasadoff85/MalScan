@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+<meta charset="UTF-8" />
+<title>MalScan</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #3fb950;
+    --danger: #f85149;
+    --warn: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 16px;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 0.9rem; }
+  .langs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .langs button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .langs button.active { color: var(--text); border-color: var(--accent); }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+  input[type=text] {
+    width: 100%;
+    padding: 10px 12px;
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: monospace;
+    font-size: 0.9rem;
+  }
+  button.submit {
+    margin-top: 12px;
+    background: var(--accent);
+    color: #0d1117;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.submit:disabled { opacity: 0.5; cursor: default; }
+  #result { margin-top: 20px; font-size: 0.9rem; }
+  .verdict { font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+  .verdict.malicious { background: var(--danger); color: white; }
+  .verdict.suspicious { background: var(--warn); color: #0d1117; }
+  .verdict.clean { background: var(--accent); color: #0d1117; }
+  .row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border); }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+
+<h1>MalScan</h1>
+<div class="subtitle" data-i18n="subtitle">Fayl icra edilmir — yalnız statik analiz.</div>
+
+<div class="langs">
+  <button onclick="setLang('az')" class="active" id="btn-az">AZ</button>
+  <button onclick="setLang('en')" id="btn-en">EN</button>
+  <button onclick="setLang('ru')" id="btn-ru">RU</button>
+</div>
+
+<div class="card">
+  <label data-i18n="label" for="hashInput">Fayl hash-i (MD5 / SHA1 / SHA256)</label>
+  <br /><br />
+  <input type="text" id="hashInput" placeholder="e.g. 44d88612fea8a8f36de82e1278abb02f" />
+  <br />
+  <button class="submit" id="submitBtn" onclick="lookupHash()" data-i18n="button">Yoxla</button>
+  <div id="result"></div>
+</div>
+
+<script>
+const i18n = {
+  az: {
+    subtitle: "Fayl icra edilmir — yalnız statik analiz.",
+    label: "Fayl hash-i (MD5 / SHA1 / SHA256)",
+    button: "Yoxla",
+    checking: "Yoxlanılır...",
+    notFound: "VirusTotal-da bu hash üçün qeyd tapılmadı.",
+    error: "Xəta: ",
+    engines: "mühərriklər",
+    malicious: "zərərli",
+    suspicious: "şübhəli",
+    clean: "təmiz",
+    link: "VirusTotal-da bax",
+  },
+  en: {
+    subtitle: "Files are never executed — static analysis only.",
+    label: "File hash (MD5 / SHA1 / SHA256)",
+    button: "Check",
+    checking: "Checking...",
+    notFound: "No record found on VirusTotal for this hash.",
+    error: "Error: ",
+    engines: "engines",
+    malicious: "malicious",
+    suspicious: "suspicious",
+    clean: "clean",
+    link: "View on VirusTotal",
+  },
+  ru: {
+    subtitle: "Файлы никогда не запускаются — только статический анализ.",
+    label: "Хэш файла (MD5 / SHA1 / SHA256)",
+    button: "Проверить",
+    checking: "Проверка...",
+    notFound: "Запись для этого хэша не найдена на VirusTotal.",
+    error: "Ошибка: ",
+    engines: "движков",
+    malicious: "вредоносный",
+    suspicious: "подозрительный",
+    clean: "чистый",
+    link: "Посмотреть на VirusTotal",
+  },
+};
+
+let currentLang = "az";
+
+function setLang(lang) {
+  currentLang = lang;
+  document.querySelectorAll(".langs button").forEach(b => b.classList.remove("active"));
+  document.getElementById("btn-" + lang).classList.add("active");
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    const key = el.getAttribute("data-i18n");
+    el.textContent = i18n[lang][key];
+  });
+}
+
+async function lookupHash() {
+  const t = i18n[currentLang];
+  const hashInput = document.getElementById("hashInput").value.trim();
+  const resultDiv = document.getElementById("result");
+  const btn = document.getElementById("submitBtn");
+
+  if (!hashInput) return;
+
+  btn.disabled = true;
+  resultDiv.innerHTML = `<p>${t.checking}</p>`;
+
+  try {
+    const resp = await fetch("/api/lookup/hash", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_hash: hashInput }),
+    });
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      resultDiv.innerHTML = `<p style="color:var(--danger)">${t.error}${data.detail}</p>`;
+      return;
+    }
+
+    if (!data.found) {
+      resultDiv.innerHTML = `<p>${t.notFound}</p>`;
+      return;
+    }
+
+    resultDiv.innerHTML = `
+      <div class="row">
+        <span>Verdict</span>
+        <span class="verdict ${data.verdict}">${t[data.verdict] || data.verdict}</span>
+      </div>
+      <div class="row"><span>${t.malicious}</span><span>${data.malicious}</span></div>
+      <div class="row"><span>${t.suspicious}</span><span>${data.suspicious}</span></div>
+      <div class="row"><span>${t.clean}</span><span>${data.harmless}</span></div>
+      <div class="row"><span>${t.engines}</span><span>${data.total_engines}</span></div>
+      <p><a href="${data.permalink}" target="_blank">${t.link}</a></p>
+    `;
+  } catch (e) {
+    resultDiv.innerHTML = `<p style="color:var(--danger)">${t.error}${e.message}</p>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+
+</body>
+</html>

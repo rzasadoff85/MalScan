@@ -1,0 +1,95 @@
+"""
+Thin wrapper around the VirusTotal v3 API for file-hash reputation lookups.
+
+Free-tier VirusTotal API keys are limited to 4 requests/minute and
+500 requests/day. This client surfaces rate-limit errors clearly so
+the caller (or a future Gemini fallback) can react to them.
+
+Docs: https://docs.virustotal.com/reference/file-info
+"""
+
+import os
+import requests
+
+VT_BASE_URL = "https://www.virustotal.com/api/v3"
+
+
+class VirusTotalError(Exception):
+    def __init__(self, message: str, status_code: int = 502):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class VirusTotalClient:
+    def __init__(self, api_key: str | None = None):
+        # Prefer an explicitly passed key, fall back to env var.
+        self.api_key = api_key or os.environ.get("VT_API_KEY")
+
+    def _headers(self):
+        if not self.api_key:
+            raise VirusTotalError(
+                "VT_API_KEY tapılmadı. .env faylında VirusTotal API açarını təyin et.",
+                status_code=500,
+            )
+        return {"x-apikey": self.api_key}
+
+    def get_file_report(self, file_hash: str) -> dict | None:
+        """
+        Look up a file hash's reputation on VirusTotal.
+        Returns None if VT has no record of the hash (404).
+        Raises VirusTotalError on rate limits or other API errors.
+        """
+        url = f"{VT_BASE_URL}/files/{file_hash}"
+
+        try:
+            resp = requests.get(url, headers=self._headers(), timeout=15)
+        except requests.RequestException as e:
+            raise VirusTotalError(f"VirusTotal-a qoşulmaq mümkün olmadı: {e}")
+
+        if resp.status_code == 404:
+            return None
+
+        if resp.status_code == 429:
+            raise VirusTotalError(
+                "VirusTotal rate limit aşıldı (4 sorğu/dəqiqə, 500/gün — pulsuz tarif). "
+                "Bir az gözlə və ya Gemini API fallback-ini aktivləşdir.",
+                status_code=429,
+            )
+
+        if resp.status_code == 401:
+            raise VirusTotalError("VirusTotal API açarı yanlışdır.", status_code=401)
+
+        if resp.status_code != 200:
+            raise VirusTotalError(
+                f"VirusTotal xətası: {resp.status_code} {resp.text[:200]}",
+                status_code=502,
+            )
+
+        data = resp.json()
+        attrs = data.get("data", {}).get("attributes", {})
+        stats = attrs.get("last_analysis_stats", {})
+
+        malicious = stats.get("malicious", 0)
+        suspicious = stats.get("suspicious", 0)
+        undetected = stats.get("undetected", 0)
+        harmless = stats.get("harmless", 0)
+        total = sum(stats.values()) if stats else 0
+
+        if malicious > 0:
+            verdict = "malicious"
+        elif suspicious > 0:
+            verdict = "suspicious"
+        else:
+            verdict = "clean"
+
+        return {
+            "hash": file_hash,
+            "found": True,
+            "malicious": malicious,
+            "suspicious": suspicious,
+            "undetected": undetected,
+            "harmless": harmless,
+            "total_engines": total,
+            "reputation": attrs.get("reputation", 0),
+            "verdict": verdict,
+            "permalink": f"https://www.virustotal.com/gui/file/{file_hash}",

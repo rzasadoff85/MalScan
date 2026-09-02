@@ -33,6 +33,9 @@ cd malscan
 - Google Gemini API inteqrasiyası (VirusTotal rate limit üçün alternativ)
 - Əlavə statik analiz metodları
 
+##Müəllif👤
+Rza Asadov // https://github.com/rzasadoff85
+
 
 
 

@@ -1,0 +1,28 @@
+# MalScan — VirusTotal modulu işə salma
+
+## Qurulum
+```bash
+cd malscan
+python -m venv venv
+source venv/bin/activate      # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env          # sonra .env-ə öz VT_API_KEY-ini yaz
+```
+
+## İşə salma
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+Sonra brauzerdə: http://localhost:8000
+
+## Test (API birbaşa)
+```bash
+curl -X POST http://localhost:8000/api/lookup/hash \
+  -H "Content-Type: application/json" \
+  -d '{"file_hash": "44d88612fea8a8f36de82e1278abb02f"}'
+```
+
+## Qeydlər
+- Pulsuz VirusTotal açarı: 4 sorğu/dəqiqə, 500/gün limiti var — `vt_client.py` bunu 429 xətası kimi tutur.
+- Bu hissə yalnız **hash reputasiya lookup**-udur (statik analiz), fayl upload/hash-ləmə/YARA/entropy modulları ayrıca əlavə olunacaq.

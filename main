@@ -1,0 +1,81 @@
+MalScan - static malware analysis web app
+Entry point: FastAPI application
+
+NOTE: This tool performs STATIC analysis / reputation lookups only.
+It never executes or runs any uploaded file.
+"""
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+import re
+
+from app.vt_client import VirusTotalClient, VirusTotalError
+
+app = FastAPI(
+    title="MalScan API",
+    description="Static malware analysis & hash reputation lookup service",
+    version="0.1.0",
+)
+
+# Allow the frontend (served separately or from /static) to call the API.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # tighten this before deploying publicly
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+vt_client = VirusTotalClient()
+
+# Accept MD5 (32), SHA1 (40), or SHA256 (64) hex hashes
+HASH_PATTERN = re.compile(r"^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$")
+
+
+class HashLookupRequest(BaseModel):
+    file_hash: str = Field(..., description="MD5, SHA1, or SHA256 hash of the file")
+
+
+class HashLookupResponse(BaseModel):
+    hash: str
+    found: bool
+    malicious: int = 0
+    suspicious: int = 0
+    undetected: int = 0
+    harmless: int = 0
+    total_engines: int = 0
+    reputation: int = 0
+    verdict: str = "unknown"
+    permalink: str | None = None
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.post("/api/lookup/hash", response_model=HashLookupResponse)
+def lookup_hash(payload: HashLookupRequest):
+    file_hash = payload.file_hash.strip()
+
+    if not HASH_PATTERN.match(file_hash):
+        raise HTTPException(
+            status_code=400,
+            detail="Yanlış hash formatı. MD5 (32), SHA1 (40) və ya SHA256 (64) simvol olmalıdır.",
+        )
+
+    try:
+        result = vt_client.get_file_report(file_hash)
+    except VirusTotalError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+
+    if result is None:
+        return HashLookupResponse(hash=file_hash, found=False)
+
+    return result
+
+
+# Serve the simple frontend
+app.mount("/", StaticFiles(directory="app/static", html=True), name="static")
